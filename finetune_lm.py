@@ -1,11 +1,11 @@
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
 
-from torch.utils.data import default_collate
+from torch.utils.data import default_collate, IterableDataset
 import pandas as pd
 from tqdm import tqdm
 
-class AutoRegressiveDataset(torch.utils.data.IterableDataset):
+class AutoRegressiveDataset(IterableDataset):
     def __init__(self, dataset, tokenizer, seq_len, device="cuda"):
         """
         dataset: list of strings
