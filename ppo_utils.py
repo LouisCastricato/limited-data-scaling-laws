@@ -1,13 +1,24 @@
 from numpy.random import randint
 from typing import Any, Callable, List
 
-def compute_elo(elo : float, win : int, k : int = 32) -> float:
+def expected(score_A, score_B):
     """
-    elo: current elo score
-    win: 1 if win, 0 if loss
-    k: k factor
+    Calculates the expected score of A in a match against B
+    score_A: score of player A
+    score_B: score of player B
     """
-    return elo + k * (win - 1 / (1 + 10 ** (elo / 400)))
+    return 1 / (1 + 10 ** ((score_B - score_A) / 400))
+
+def compute_elo(old, expected, score, k=32):
+    """
+    Computes the new elo score for a player
+    old: old elo score
+    expected: expected score of the player
+    score: actual score of the player
+    k: k-factor
+    """
+    return old + k * (score - expected)
+
 
 
 def elo_schedule(prior : Any,
@@ -16,7 +27,7 @@ def elo_schedule(prior : Any,
     player_scores : List[float] = None, 
     samples : int = 20, 
     step_factor : int = 0,
-    mbs : int = 3,
+    mbs : int = 1,
     order : List[int] = None) -> List[Any]:
     """
     prior: prior distribution
@@ -30,13 +41,23 @@ def elo_schedule(prior : Any,
     returns: a tuple of the players and their scores
     """
     
-    # if this is the first time, set the initial scores to 1000
+    # if this is the first time, set the initial scores to 1000 and initialize the order
     if player_scores is None:
         player_scores = [1000] * len(players)
         order = list(range(len(players)))
 
     # zip players and scores together
     players_and_scores = list(zip(players, player_scores, order))
+
+    # base case
+    if samples == 0:
+        # Return to the original ordering
+        players_and_scores.sort(key=lambda x: x[2])
+
+        # extract just player and scores
+        return list(map(list, zip(*players_and_scores)))[:2]
+
+    # if we aren't in the base case, we have another sample to compute.
 
     # sort by score
     players_and_scores.sort(key=lambda x: x[1], reverse=True)
@@ -46,23 +67,13 @@ def elo_schedule(prior : Any,
     players = players_and_scores[0]
     player_scores = players_and_scores[1]
     order = players_and_scores[2]
-    
-    # base case
-    if samples == 0:
-        # sort by order
-        players_and_scores = list(zip(players, player_scores, order))
-        players_and_scores.sort(key=lambda x: x[2])
-        # extract just player and scores
-        players_and_scores = list(map(list, zip(*players_and_scores)))
-        players = players_and_scores[0]
-        player_scores = players_and_scores[1]
-        return [players, player_scores]
+
 
     # Compute the match ups first, then microbatch over them using compute elo.
     pairings = []
     idxs = []
 
-    # take every sequenic pair of players
+    # get a bunch of pairs of players
     for i in range(len(players)//2):
         # get the first two players
         player1 = players[i*2]    
@@ -87,12 +98,18 @@ def elo_schedule(prior : Any,
         mbs_idxs2 = [idx[1] for idx in idxs[i:i+mbs]]
 
         # play the matches (This is the expensive part)
-        mbs_results = match_function(prior, mbs_player1, mbs_player2)
+        mbs_results = [match_function(prior, mbs_player1, mbs_player2)]
 
         # update the scores
         for j in range(len(mbs_results)):
-            player_scores[mbs_idxs1[j]] = compute_elo(player_scores[mbs_idxs1[j]], mbs_results[j])
-            player_scores[mbs_idxs2[j]] = compute_elo(player_scores[mbs_idxs2[j]], 1 - mbs_results[j])
+            expected_score1 = expected(player_scores[mbs_idxs1[j]], player_scores[mbs_idxs2[j]])
+            expected_score2 = expected(player_scores[mbs_idxs2[j]], player_scores[mbs_idxs1[j]])
+
+            #print(f"Player {mbs_idxs1[j]} had an expected score of {expected_score1} and a score of {mbs_results[j]}")
+            #print(f"Player {mbs_idxs2[j]} had an expected score of {expected_score2} and a score of {1-mbs_results[j]}")
+            
+            player_scores[mbs_idxs1[j]] = compute_elo(player_scores[mbs_idxs1[j]], expected_score1, mbs_results[j])
+            player_scores[mbs_idxs2[j]] = compute_elo(player_scores[mbs_idxs2[j]], expected_score2, 1-mbs_results[j])
 
     # recurse
     return elo_schedule(prior, players, match_function, player_scores, samples - 1, step_factor, order=order)

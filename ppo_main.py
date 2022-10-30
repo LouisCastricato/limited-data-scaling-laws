@@ -16,13 +16,13 @@ class SentimentELOCritic(ELOCriticModel):
         self.tokenizer = tokenizer
 
         # set the pad token
-        self.tokenizer.pad_token = self.tokenizer.eos_token
+        self.tokenizer.pad_token = "<|endoftext|>"
 
         # load dataframe from prompt_dir
         self.df = pd.read_csv(prompt_dir, sep=",")
 
         # choices for multiple choice questions
-        self.option_tokens = self.tokenizer(["A", "B"])['input_ids']
+        self.option_tokens = self.tokenizer([" A", " B"])['input_ids']
 
     def get_prompt(self, input_prompt : str, option_a : str, option_b : str, k : int = 5) -> str:
         """
@@ -65,7 +65,7 @@ class SentimentELOCritic(ELOCriticModel):
         # for the input prompt, find the length per prompt by summing the attention mask
         input_prompt_len = torch.sum(input_prompt['attention_mask'], dim=1)
         # forward pass through the model
-        output = self.model(**input_prompt)
+        output = self.model(input_ids=input_prompt['input_ids'], attention_mask=input_prompt['attention_mask'])
         # get the last logit for each prompt
         output = output.logits[torch.arange(bs).to("cuda"), input_prompt_len-1]
 
@@ -75,25 +75,31 @@ class SentimentELOCritic(ELOCriticModel):
 
         # softmax over the logits
         option_a_b_probs = torch.softmax(torch.stack([option_a_logits, option_b_logits], dim=1), dim=1)
-
+        
         # take argmax over the probabilities
         option_a_b_argmax = torch.argmax(option_a_b_probs, dim=1).squeeze()
 
         # return the argmax
-        return (1 - option_a_b_argmax).cpu().tolist()
+        return (1-option_a_b_argmax).cpu().tolist()
 
 
 
 if __name__ == "__main__":
-    model = AutoModelForCausalLM.from_pretrained("gpt2").to("cuda")
-    tokenizer = AutoTokenizer.from_pretrained("gpt2")
+    model = AutoModelForCausalLM.from_pretrained("EleutherAI/pythia-1.3b-deduped").to("cuda")
+    tokenizer = AutoTokenizer.from_pretrained("EleutherAI/pythia-1.3b-deduped")
     prompt_dir = "prompts_shorter.csv"
 
     critic_model = SentimentELOCritic(model, tokenizer, prompt_dir)
-
+    
     # curry to make a static function
     def match_function(prior, player1, player2):
         return critic_model.match_function(prior, player1, player2)
+
+    # test the elo_schedule
+    elo_out = elo_schedule("Avatar the last airbender Complete Series", 
+    ["Best show ever.", "I really didn't like this show.", "Possibly the worst show I've ever seen.", "Best purchase ever!", "I loved this show."], 
+    match_function)
+    print(elo_out)
 
     def reward_fn(samples : List[str], **kwargs) -> List[float]:
         """
@@ -110,10 +116,10 @@ if __name__ == "__main__":
         # return the rewards
         return rewards
 
-    model = trlx.train(
-        "finetuned_student_model/",
-        reward_fn=reward_fn,
-        prompts=["This is a prior"],
-        eval_prompts=["This is a different prior"]
-    )
+    #model = trlx.train(
+    #    "finetuned_student_model/",
+    #    reward_fn=reward_fn,
+    #    prompts=["This is a prior"],
+    #    eval_prompts=["This is a different prior"]
+    #)
     
