@@ -24,7 +24,7 @@ class SentimentELOCritic(ELOCriticModel):
         # choices for multiple choice questions
         self.option_tokens = self.tokenizer([" A", " B"])['input_ids']
 
-    def get_prompt(self, input_prompt : str, option_a : str, option_b : str, k : int = 5) -> str:
+    def get_prompt(self, input_prompt : str, option_a : str, option_b : str, k : int = 4) -> str:
         """
         input_prompt: string
         option_a: a string outlining the first option for the multiple choice question
@@ -32,8 +32,8 @@ class SentimentELOCritic(ELOCriticModel):
         k: number of examples to use in the prompt.
         Gets a random prompt from the dataframe. Construct a prompt from k examples. Appends a blank example at the end.
         """
-        # choose k random examples from the dataframe
-        examples = self.df.sample(k)
+        # choose the first k examples from the dataframe
+        examples = self.df.iloc[:k]
 
         # for each example, take prompt and append answer
         prompts = []
@@ -80,13 +80,13 @@ class SentimentELOCritic(ELOCriticModel):
         option_a_b_argmax = torch.argmax(option_a_b_probs, dim=1).squeeze()
 
         # return the argmax
-        return (1-option_a_b_argmax).cpu().tolist()
+        return option_a_b_argmax.cpu().tolist()
 
 
 
 if __name__ == "__main__":
-    model = AutoModelForCausalLM.from_pretrained("EleutherAI/pythia-1.3b-deduped").to("cuda")
-    tokenizer = AutoTokenizer.from_pretrained("EleutherAI/pythia-1.3b-deduped")
+    model = AutoModelForCausalLM.from_pretrained("EleutherAI/pythia-6.7b-deduped").to("cuda")
+    tokenizer = AutoTokenizer.from_pretrained("EleutherAI/pythia-6.7b-deduped")
     prompt_dir = "prompts_shorter.csv"
 
     critic_model = SentimentELOCritic(model, tokenizer, prompt_dir)
@@ -96,9 +96,10 @@ if __name__ == "__main__":
         return critic_model.match_function(prior, player1, player2)
 
     # test the elo_schedule
-    elo_out = elo_schedule("Avatar the last airbender Complete Series", 
-    ["Best show ever.", "I really didn't like this show.", "Possibly the worst show I've ever seen.", "Best purchase ever!", "I loved this show."], 
-    match_function)
+    elo_out = elo_schedule("Avatar the last airbender - Complete Series DVD", 
+    ["This is quite possibly the best show ever. I'm happy with my purchase.", "I really didn't like this show, there were many issues. I want to return this.",\
+     "Possibly the worst show I've ever seen.", "Best purchase ever! I love this show.", "I loved this show as a child, I think it still holds up."], 
+    match_function, step_factor=2, tournament_size=2, samples=10)
     print(elo_out)
 
     def reward_fn(samples : List[str], **kwargs) -> List[float]:
