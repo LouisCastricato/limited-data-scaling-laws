@@ -40,8 +40,8 @@ class SentimentELOCritic(ELOCriticModel):
             prompt = input_instructions + "\n".join(prompts) +"\n" + str(len(examples)+1) + ") Product: " + input_prompt + "\nReview A: " + option_a +\
             "\nReview B: " + option_b + "\nWhich review is more positive about Product, A or B?"
         else:
-            input_instructions = "Which review is more positive about "
-            prompt = input_instructions + input_prompt + "?\nReview A: " + option_a +\
+            input_instructions = "Which review is more positive"
+            prompt = input_instructions + "?\nReview A: " + option_a +\
             "\nor\nReview B: " + option_b + "\nAnswer either A or B."
         return prompt
 
@@ -96,7 +96,7 @@ class T5SentimentELOCritic(SentimentELOCritic):
         super().__init__(model, tokenizer, prompt_dir)
 
         # choices for multiple choice questions
-        self.option_tokens = self.tokenizer([" A", " B"])['input_ids']
+        self.option_tokens = self.tokenizer(["A", "B"])['input_ids']
         self.option_tokens = list(map(lambda x: x[0], self.option_tokens))
 
     @torch.no_grad()
