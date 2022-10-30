@@ -28,7 +28,7 @@ def elo_schedule(prior : Any,
     samples : int = 20, 
     step_factor : int = 0,
     tournament_size : int = 1,
-    mbs : int = 1,
+    mbs : int = 4,
     order : List[int] = None) -> List[Any]:
     """
     prior: prior distribution
@@ -103,14 +103,14 @@ def elo_schedule(prior : Any,
         mbs_idxs2 = [idx[1] for idx in idxs[i:i+mbs]]
 
         # play the matches (This is the expensive part). Do both ways to account for a tie.
-        match_results_pos =[match_function(prior, mbs_player1, mbs_player2)]
-        match_results_neg =[match_function(prior, mbs_player2, mbs_player1)]
+        match_results_pos = match_function(prior, mbs_player1, mbs_player2)
+        match_results_neg = match_function(prior, mbs_player2, mbs_player1)
         # average over both samples
         match_results = list(map(lambda x: (x[0] + x[1])/2, zip(match_results_pos, match_results_neg)))
 
         # record the results
         for idx, match in enumerate(match_results):
-            wins[mbs_idxs1[idx]] += (1-match)
+            wins[mbs_idxs1[idx]] += 1-match
             wins[mbs_idxs2[idx]] += match
 
     # update the scores
