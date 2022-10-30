@@ -90,18 +90,30 @@ if __name__ == "__main__":
     prompt_dir = "prompts_shorter.csv"
 
     critic_model = SentimentELOCritic(model, tokenizer, prompt_dir)
-    
-    # test 
-    critic_model.get_prompt("This is a test", "This is option A", "This is option B")
-    critic_model.match_function("This is a prior", 
-    ["This is a test A", "This is a test A2"], 
-    ["This is a test B", "This is a test B2"])
 
     # curry to make a static function
     def match_function(prior, player1, player2):
         return critic_model.match_function(prior, player1, player2)
 
-    # test the elo_schedule
-    print(elo_schedule("This is a prior", 
-    ["This is a test A", "This is a test A2", "This is a test B", "This is a test B2"], 
-    match_function))
+    def reward_fn(samples : List[str], **kwargs) -> List[float]:
+        """
+        samples: list of strings for the samples
+        prior: string for the prior
+        Returns a list of rewards for each sample.
+        """
+        # get the match function
+        rewards = elo_schedule(kwargs['prior'], samples, match_function)[1]
+
+        # normalize the scores. highest elo is 4000, lowest is 1000
+        rewards = list(map(lambda x: x/4000.0, scores))
+
+        # return the rewards
+        return rewards
+
+    model = trlx.train(
+        "finetuned_student_model/",
+        reward_fn=reward_fn,
+        prompts=["This is a prior"],
+        eval_prompts=["This is a different prior"]
+    )
+    
