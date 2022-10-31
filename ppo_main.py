@@ -7,15 +7,25 @@ from critic_models import GPTSentimentELOCritic, T5SentimentELOCritic
 from ppo_utils import elo_schedule
 
 if __name__ == "__main__":
-    model = AutoModelForSeq2SeqLM.from_pretrained("google/flan-t5-xl", torch_dtype=torch.float16).to("cuda")
-    tokenizer = AutoTokenizer.from_pretrained("google/flan-t5-xl")
+    model = AutoModelForSeq2SeqLM.from_pretrained("google/flan-t5-base", torch_dtype=torch.float16).to("cuda")
+    tokenizer = AutoTokenizer.from_pretrained("google/flan-t5-base")
     prompt_dir = "prompts_shorter.csv"
 
     critic_model = T5SentimentELOCritic(model, tokenizer, prompt_dir)
-    
+
     # curry to make a static function
     def match_function(prior, player1, player2):
         return critic_model.match_function(prior, player1, player2)
+
+    # test the elo_schedule
+    elo_out = elo_schedule("Avatar the last airbender - Complete Series DVD", 
+    ["This is quite possibly the best show ever. I'm happy with my purchase.", "I really didn't like this show, there were many issues. I want to return this.",\
+     "Possibly the worst show I've ever seen.", "Best purchase ever! I love this show.", "I loved this show as a child, I think it still holds up."], 
+    match_function, step_factor=0, tournament_size=1, samples=20)
+    print(elo_out)
+    import sys
+    sys.exit()
+
 
     def reward_fn(samples : List[str]) -> List[float]:
         """

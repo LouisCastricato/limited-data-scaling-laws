@@ -43,6 +43,7 @@ class SentimentELOCritic(ELOCriticModel):
             input_instructions = "Which review is more positive"
             prompt = input_instructions + "?\nReview A: " + option_a +\
             "\nor\nReview B: " + option_b + "\nAnswer either A or B."
+
         return prompt
 
 # Accomodates GPT critic models (AR)
@@ -56,7 +57,7 @@ class GPTSentimentELOCritic(SentimentELOCritic):
         self.option_tokens = self.tokenizer([" A", " B"])['input_ids']
 
     @torch.no_grad()
-    def match_function(self, prior : str, player1 : List[str], player2 : List[str]) -> List[int]:
+    def match_function(self, prior : str, player1 : List[str], player2 : List[str]) -> List[float]:
         """
         prior: string for the product name
         player1: list of strings for the first option
@@ -100,7 +101,7 @@ class T5SentimentELOCritic(SentimentELOCritic):
         self.option_tokens = list(map(lambda x: x[0], self.option_tokens))
 
     @torch.no_grad()
-    def match_function(self, prior : str, player1 : List[str], player2 : List[str]) -> List[int]:
+    def match_function(self, prior : str, player1 : List[str], player2 : List[str]) -> List[float]:
         """
         prior: string for the product name
         player1: list of strings for the first option
@@ -133,8 +134,5 @@ class T5SentimentELOCritic(SentimentELOCritic):
         # softmax over the logits
         option_a_b_probs = torch.softmax(torch.stack([option_a_logits, option_b_logits], dim=1), dim=1)
         
-        # take argmax over the probabilities
-        option_a_b_argmax = torch.argmax(option_a_b_probs, dim=1).squeeze()
-
-        # return the argmax
-        return option_a_b_argmax.cpu().tolist()
+        # return the logit for the first option
+        return option_a_b_probs[:, 0].cpu().tolist()

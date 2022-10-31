@@ -9,7 +9,7 @@ def expected(score_A, score_B):
     """
     return 1 / (1 + 10 ** ((score_B - score_A) / 400))
 
-def compute_elo(old, expected, score, k=32):
+def compute_elo(old, expected, score, k=16):
     """
     Computes the new elo score for a player
     old: old elo score
@@ -28,7 +28,7 @@ def elo_schedule(prior : Any,
     samples : int = 20, 
     step_factor : int = 0,
     tournament_size : int = 1,
-    mbs : int = 4,
+    mbs : int = 1,
     order : List[int] = None) -> List[Any]:
     """
     prior: prior distribution
@@ -105,13 +105,14 @@ def elo_schedule(prior : Any,
         # play the matches (This is the expensive part). Do both ways to account for a tie.
         match_results_pos = match_function(prior, mbs_player1, mbs_player2)
         match_results_neg = match_function(prior, mbs_player2, mbs_player1)
+
         # average over both samples
         match_results = list(map(lambda x: (x[0] + x[1])/2, zip(match_results_pos, match_results_neg)))
 
         # record the results
         for idx, match in enumerate(match_results):
-            wins[mbs_idxs1[idx]] += 1-match
-            wins[mbs_idxs2[idx]] += match
+            wins[mbs_idxs1[idx]] += match
+            wins[mbs_idxs2[idx]] += 1-match
 
     # update the scores
     for player_i in range(len(players)):
