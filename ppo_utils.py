@@ -1,5 +1,9 @@
+import math
+import numpy as np
 from numpy.random import randint
 from typing import Any, Callable, List
+
+rng = np.random.RandomState(0)
 
 def expected(score_A, score_B):
     """
@@ -42,95 +46,54 @@ def elo_schedule(prior : Any,
     order: list of indices for the order of the players
     returns: a tuple of the players and their scores
     """
-    
+
     # if this is the first time, set the initial scores to 1000 and initialize the order
     if player_scores is None:
         player_scores = [1000] * len(players)
-        order = list(range(len(players)))
-
-    # zip players and scores together
-    players_and_scores = list(zip(players, player_scores, order))
 
     # base case
     if samples == 0:
-        # Return to the original ordering
-        players_and_scores.sort(key=lambda x: x[2])
+        return players, player_scores
 
-        # extract just player and scores
-        return list(map(list, zip(*players_and_scores)))[:2]
-
-    # if we aren't in the base case, we have another sample to compute.
-
-    # sort by score
-    players_and_scores.sort(key=lambda x: x[1], reverse=True)
-    
-    # unzip
-    players_and_scores = list(map(list, zip(*players_and_scores)))
-    players = players_and_scores[0]
-    player_scores = players_and_scores[1]
-    order = players_and_scores[2]
-
+    wins = [0] * len(players)
 
     # Compute the match ups first, then microbatch over them using compute elo.
-    pairings = []
-    idxs = []
-    wins = [0]*len(players)
-
+    pairs = []
     for _ in range(tournament_size):
-        # get a bunch of pairs of players
-        for i in range(len(players)-1):
-            # get the first two players
-            player1 = players[i]    
+        # since we can draw many samples, we can match randomly
+        idxs = np.arange(len(players))
+        rng.shuffle(idxs)
 
-            # get the second player, which is either the next player or a random player
-            step = randint(1, step_factor+1) if step_factor > 0 else 1
-            player2 = players[min(i+step, len(players)-1)]
+        # in uneven case, remove either first or last participant
+        if len(players) & 1:
+            idxs = np.delete(idxs, -rng.randint(2))
 
-            # queue up the match
-            if i != min(i+step, len(players)-1):
-                pairings.append((player1, player2))
-                idxs.append((i, min(i+step, len(players)-1)))
-    
+        pairs.append(idxs.reshape(-1, 2))
+
+    pairs = np.vstack(pairs)
+    players1 = [players[pair[0]] for pair in pairs]
+    players2 = [players[pair[1]] for pair in pairs]
+
     # play the matches, using mbs
-    for i in range(0, len(pairings), mbs):
+    results = []
+    for i in range(math.ceil(len(pairs)/mbs)):
+        batch_ixs = slice(i*mbs, (i+1)*mbs)
+        results.extend(match_function(prior, players1[batch_ixs], players2[batch_ixs]))
 
-        # transpose so we get mbs_player1, mbs_player2
-        mbs_player1 = [match[0] for match in pairings[i:i+mbs]]
-        mbs_player2 = [match[1] for match in pairings[i:i+mbs]]
+    # record the results
+    for result, (p1, p2) in zip(results, pairs):
+        wins[p1] += result
+        wins[p2] += 1 - result
 
-        # get the idxs to update the player scores
-        mbs_idxs1 = [idx[0] for idx in idxs[i:i+mbs]]
-        mbs_idxs2 = [idx[1] for idx in idxs[i:i+mbs]]
-
-        # play the matches (This is the expensive part). Do both ways to account for a tie.
-        match_results_pos = match_function(prior, mbs_player1, mbs_player2)
-        match_results_neg = match_function(prior, mbs_player2, mbs_player1)
-
-        # average over both samples
-        match_results = list(map(lambda x: (x[0] + x[1])/2, zip(match_results_pos, match_results_neg)))
-
-        # record the results
-        for idx, match in enumerate(match_results):
-            wins[mbs_idxs1[idx]] += match
-            wins[mbs_idxs2[idx]] += 1-match
-
-    # update the scores
-    for player_i in range(len(players)):
-        # get all the matches that player_i played
-        played_matches_loc = [i for i, idx in enumerate(idxs) if player_i in idx]
-        played_matches_idxs = [idx for i, idx in enumerate(idxs) if player_i in idx]
-
-        # for every played match, change it so that player_i is always idx 0
-        played_matches_idxs = [(idx[0], idx[1]) if idx[0] == player_i else (idx[1], idx[0]) for idx in played_matches_idxs]
-
-        # given the played matches, compute the expected ELO
-        expected_elo = sum([expected(player_scores[match[0]], player_scores[match[1]]) for match in played_matches_idxs])
-
-        # compute the new ELO
-        player_scores[player_i] = compute_elo(player_scores[player_i], expected_elo, wins[player_i])
+    # update elo
+    next_player_scores = np.zeros(len(players))
+    for pix in range(len(players)):
+        opponents = [set(pair).difference({pix}).pop() for pair in pairs if pix in pair]
+        expected_score = sum(expected(player_scores[pix], player_scores[opp]) for opp in opponents)
+        next_player_scores[pix] = compute_elo(player_scores[pix], expected_score, wins[pix])
 
     # recurse
-    return elo_schedule(prior, players, match_function, player_scores, samples - 1, step_factor, order=order, tournament_size=tournament_size)
+    return elo_schedule(prior, players, match_function, next_player_scores, samples - 1, step_factor, tournament_size=tournament_size, mbs=mbs)
 
 # The critic model below is a language model that we'll prompt for a single set of logits.
 class ELOCriticModel:
@@ -141,6 +104,18 @@ class ELOCriticModel:
         """
         self.model = model
         self.tokenizer = tokenizer
-        
+
     def match_function(self, priors, player1, player2):
         raise NotImplementedError
+
+if __name__ == '__main__':
+    # test elo_schedule
+    players = np.arange(5)
+    match_function = lambda prior, xs1, xs2: (np.array(xs1) > np.array(xs2)).astype(int)
+    ranking = elo_schedule(None, players, match_function, mbs=3, tournament_size=10, samples=100)
+    xs = sorted(zip(*ranking), key=lambda x: x[1], reverse=True)
+    print('ELO for number comparisons:')
+    for sample, rating in xs:
+        print(f'[{rating:.0f}]', sample)
+    assert all(players == np.argsort(ranking[1]))
+

@@ -18,11 +18,20 @@ if __name__ == "__main__":
         return critic_model.match_function(prior, player1, player2)
 
     # test the elo_schedule
-    elo_out = elo_schedule("Avatar the last airbender - Complete Series DVD", 
-    ["This is quite possibly the best show ever. I'm happy with my purchase.", "I really didn't like this show, there were many issues. I want to return this.",\
-     "Possibly the worst show I've ever seen.", "Best purchase ever! I love this show.", "I loved this show as a child, I think it still holds up."], 
-    match_function, step_factor=0, tournament_size=1, samples=20)
-    print(elo_out)
+    prior = "Avatar the last airbender - Complete Series DVD"
+    continuations = [
+        "This is quite possibly the best show ever. I'm happy with my purchase.",
+        "I really didn't like this show, there were many issues. I want to return this.",
+        "Possibly the worst show I've ever seen.",
+        "Best purchase ever! I love this show.",
+        "I like this show, I think it is cool."
+    ]
+    elo_out = elo_schedule(prior, continuations, match_function, step_factor=0, tournament_size=1, samples=20, mbs=2)
+
+    xs = sorted(zip(*elo_out), key=lambda x: x[1], reverse=True)
+    for sample, rating in xs:
+        print(f'[{rating:.0f}]', sample)
+
     import sys
     sys.exit()
 
@@ -55,4 +64,4 @@ if __name__ == "__main__":
         prompts=train_prompts,
         eval_prompts=test_prompts
     )
-    
+
