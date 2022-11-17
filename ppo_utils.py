@@ -1,7 +1,7 @@
 import math
 import numpy as np
 from numpy.random import randint
-from typing import Any, Callable, List
+from typing import Any, Callable, Dict, List
 
 rng = np.random.RandomState(0)
 
@@ -33,7 +33,8 @@ def elo_schedule(prior : Any,
     step_factor : int = 0,
     tournament_size : int = 1,
     mbs : int = 1,
-    order : List[int] = None) -> List[Any]:
+    order : List[int] = None,
+    list_return_dict : List[Dict[Any, float]] = []) -> List[Any]:
     """
     prior: prior distribution
     players: list of players
@@ -44,6 +45,7 @@ def elo_schedule(prior : Any,
     tournament_size: how many assignments per sample (lower bound)
     mbs: number of matches to play at once
     order: list of indices for the order of the players
+    return_dict: a list of dicts for the scores at each tournament
     returns: a tuple of the players and their scores
     """
 
@@ -53,7 +55,7 @@ def elo_schedule(prior : Any,
 
     # base case
     if samples == 0:
-        return players, player_scores
+        return list_return_dict
 
     wins = [0] * len(players)
 
@@ -82,18 +84,23 @@ def elo_schedule(prior : Any,
 
     # record the results
     for result, (p1, p2) in zip(results, pairs):
-        wins[p1] += result
-        wins[p2] += 1 - result
+        wins[p1] += 1 - result
+        wins[p2] += result
 
     # update elo
     next_player_scores = np.zeros(len(players))
+    out_dict = {}
     for pix in range(len(players)):
         opponents = [set(pair).difference({pix}).pop() for pair in pairs if pix in pair]
         expected_score = sum(expected(player_scores[pix], player_scores[opp]) for opp in opponents)
         next_player_scores[pix] = compute_elo(player_scores[pix], expected_score, wins[pix])
+        out_dict[players[pix]] = next_player_scores[pix]
+    
+    list_return_dict.append(out_dict)
 
     # recurse
-    return elo_schedule(prior, players, match_function, next_player_scores, samples - 1, step_factor, tournament_size=tournament_size, mbs=mbs)
+    return elo_schedule(prior, players, match_function, next_player_scores, samples - 1, step_factor, 
+    tournament_size=tournament_size, mbs=mbs, list_return_dict=list_return_dict)
 
 # The critic model below is a language model that we'll prompt for a single set of logits.
 class ELOCriticModel:

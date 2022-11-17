@@ -48,7 +48,7 @@ def collate(string):
 
     # append EOT after
     output_string = "Product name: " + name + "\nProduct review: " + review
-    return tokenizer.decode(tokenizer(output_string)['input_ids'] +[0])
+    return  tokenizer.decode(tokenizer(output_string)['input_ids'] + [0])
 
 # collate over the entire dataset
 dataset = []

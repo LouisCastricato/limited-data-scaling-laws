@@ -9,15 +9,16 @@ from typing import Any, List
 
 # Base class for the critic model
 class SentimentELOCritic(ELOCriticModel):
-    def __init__(self, model, tokenizer, prompt_dir):
+    def __init__(self, model, tokenizer, prompt_dir, suffix):
         super().__init__(model, tokenizer)
         self.model = model
         self.tokenizer = tokenizer
+        self.suffix = suffix
 
         # load dataframe from prompt_dir
-        self.df = pd.read_csv(prompt_dir, sep=",") 
+        self.df = pd.read_csv(prompt_dir, sep=",")
 
-    def get_prompt(self, input_prompt : str, option_a : str, option_b : str, k : int = 10) -> str:
+    def get_prompt(self, input_prompt : str, option_a : str, option_b : str, k : int = 5) -> str:
         """
         input_prompt: string
         option_a: a string outlining the first option for the multiple choice question
@@ -31,25 +32,29 @@ class SentimentELOCritic(ELOCriticModel):
         # for each example, take prompt and append answer
         prompts = []
         for i in range(len(examples)):
-            prompt = examples.iloc[i]['prompt']
-            answer = examples.iloc[i]['answer']
+            review_A_prompt = "Review A: " + examples.iloc[i]["A"]
+            review_B_prompt = "Review B: " + examples.iloc[i]["B"]
+            review_question = "Which review is more " + self.suffix + " about Product, A or B? "
+            answer = examples.iloc[i]["answer"]
+            prompt = review_A_prompt + "\n" + review_B_prompt + "\n" + review_question
             prompts.append(str(i+1) + ") " + prompt + " " + answer)
-        input_instructions = "Below is a set of product names and two reviews for each product. Pick the review which is more positive about the product.\n"
+        
+        input_instructions = "Below is a pair of product reviews for a specific product. Pick the review which is more " + self.suffix +  " about the product.\n"
         # add the input prompt and options
         if k > 0:
-            prompt = input_instructions + "\n".join(prompts) +"\n" + str(len(examples)+1) + ") Product: " + input_prompt + "\nReview A: " + option_a +\
-            "\nReview B: " + option_b + "\nWhich review is more positive about Product, A or B?"
+            prompt = input_instructions + "\n".join(prompts) +"\n" + str(len(examples)+1) + ") Review A: " + option_a +\
+            "\nReview B: " + option_b + "\nWhich review is more " + self.suffix + " about Product, A or B?"
         else:
-            input_instructions = "Which review is more positive"
-            prompt = input_instructions + "?\nReview A: " + option_a +\
+            input_instructions = "Which review is more " + self.suffix + " about Product, A or B?"
+            prompt = input_instructions + "\nReview A: " + option_a +\
             "\nor\nReview B: " + option_b + "\nAnswer either A or B."
 
         return prompt
 
 # Accomodates GPT critic models (AR)
 class GPTSentimentELOCritic(SentimentELOCritic):
-    def __init__(self, model, tokenizer, prompt_dir):
-        super().__init__(model, tokenizer, prompt_dir)
+    def __init__(self, model, tokenizer, prompt_dir, suffix="positive"):
+        super().__init__(model, tokenizer, prompt_dir, suffix)
         # set the pad token
         self.tokenizer.pad_token = "<|endoftext|>"
 
@@ -86,15 +91,19 @@ class GPTSentimentELOCritic(SentimentELOCritic):
         
         # take argmax over the probabilities
         option_a_b_argmax = torch.argmax(option_a_b_probs, dim=1).squeeze()
+        out = option_a_b_argmax.cpu().tolist()
+        if type(out) == int:
+            out = [out]
 
         # return the argmax
-        return option_a_b_argmax.cpu().tolist()
+        return out
+
 
 
 # Accomodates T5 critic models (seq2seq)
 class T5SentimentELOCritic(SentimentELOCritic):
-    def __init__(self, model, tokenizer, prompt_dir):
-        super().__init__(model, tokenizer, prompt_dir)
+    def __init__(self, model, tokenizer, prompt_dir, suffix="positive"):
+        super().__init__(model, tokenizer, prompt_dir, suffix=suffix)
 
         # choices for multiple choice questions
         self.option_tokens = self.tokenizer(["A", "B"])['input_ids']
@@ -134,5 +143,11 @@ class T5SentimentELOCritic(SentimentELOCritic):
         # softmax over the logits
         option_a_b_probs = torch.softmax(torch.stack([option_a_logits, option_b_logits], dim=1), dim=1)
         
-        # return the logit for the first option
-        return option_a_b_probs[:, 0].cpu().tolist()
+        # take argmax over the probabilities
+        option_a_b_argmax = torch.argmax(option_a_b_probs, dim=1).squeeze()
+        out = option_a_b_argmax.cpu().tolist()
+        if type(out) == int:
+            out = [out]
+
+        # return the argmax
+        return out
