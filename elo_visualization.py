@@ -15,7 +15,7 @@ if __name__ == "__main__":
     
     #model = AutoModelForSeq2SeqLM.from_pretrained("google/flan-t5-base", torch_dtype=torch.float16).to("cuda")
     #tokenizer = AutoTokenizer.from_pretrained("google/flan-t5-base")
-    prompt_dir = "prompts_reprocessed.csv"
+    prompt_dir = "datasets/prompts_reprocessed.csv"
     suffix = "positive"
 
     critic_model = GPTSentimentELOCritic(model, tokenizer, prompt_dir, suffix=suffix)
@@ -25,7 +25,7 @@ if __name__ == "__main__":
         return critic_model.match_function(prior, player1, player2)
 
     # load watchband.txt, line delimited
-    continuations = open("watchband.txt", "r").read().splitlines()
+    continuations = open("datasets/watchband.txt", "r").read().splitlines()
 
     elo_out = elo_schedule(None, continuations, match_function, step_factor=0, tournament_size=5, samples=10, mbs=1)
 

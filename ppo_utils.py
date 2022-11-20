@@ -30,10 +30,8 @@ def elo_schedule(prior : Any,
     match_function : Callable, 
     player_scores : List[float] = None, 
     samples : int = 20, 
-    step_factor : int = 0,
     tournament_size : int = 1,
     mbs : int = 1,
-    order : List[int] = None,
     list_return_dict : List[Dict[Any, float]] = []) -> List[Any]:
     """
     prior: prior distribution
@@ -41,10 +39,8 @@ def elo_schedule(prior : Any,
     match_function: function that takes two players and returns a win (1) or loss (0)
     player_scores: list of scores for each player
     samples: number of matches to play per player
-    step_factor: if 0, we choose the next player for a matchup, otherwise we choose a player up to step_factor away from the current player
     tournament_size: how many assignments per sample (lower bound)
     mbs: number of matches to play at once
-    order: list of indices for the order of the players
     return_dict: a list of dicts for the scores at each tournament
     returns: a tuple of the players and their scores
     """
@@ -99,7 +95,7 @@ def elo_schedule(prior : Any,
     list_return_dict.append(out_dict)
 
     # recurse
-    return elo_schedule(prior, players, match_function, next_player_scores, samples - 1, step_factor, 
+    return elo_schedule(prior, players, match_function, next_player_scores, samples - 1, 
     tournament_size=tournament_size, mbs=mbs, list_return_dict=list_return_dict)
 
 # The critic model below is a language model that we'll prompt for a single set of logits.

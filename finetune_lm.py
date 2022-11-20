@@ -38,7 +38,7 @@ bs = 2
 grad_acc_steps = 8
 
 # load finetuning_examples.csv, which is comma delimited
-df = pd.read_csv("finetuning_examples.csv", sep=",")
+df = pd.read_csv("datasets/finetuning_examples.csv", sep=",")
 
 
 def collate(string):
