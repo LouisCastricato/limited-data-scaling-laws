@@ -24,7 +24,42 @@ class AutoRegressiveDataset(IterableDataset):
         # take a random sample from the dataset of length seq_len
         start = torch.randint(0, len(self.tokenized_dataset) - self.seq_len, (1,)).item()
         end = start + self.seq_len
-        return torch.tensor(self.tokenized_dataset[start:end]).to(self.device)
+        out_tensor = torch.tensor(self.tokenized_dataset[start:end], device=self.device)
+        
+        return {
+            "input_ids": out_tensor,
+            "attention_mask": torch.ones_like(out_tensor, device=self.device),
+        }
+
+class SingleSampleDataset(IterableDataset):
+    def __init__(self, dataset, tokenizer, seq_len, device="cuda"):
+        """
+        dataset: list of strings
+        tokenizer: tokenizer object
+        seq_len: sequence length
+        """
+        self.dataset = dataset
+        self.tokenizer = tokenizer
+        self.seq_len = seq_len
+        self.device = device
+        self.untokenized_dataset = self.dataset
+
+        self.tokenized_dataset = self.tokenizer(self.dataset, padding=False, truncation=False)
+        self.idx = 0
+    def __iter__(self):
+        return self
+    def __next__(self):
+        # retrieve tokenized_dataset at idx
+        tokenized_sample = self.tokenizer(self.untokenized_dataset[self.idx], padding=False, truncation=False)
+        self.idx += 1
+        print(tokenized_sample['input_ids'])
+        import sys
+        sys.exit()
+        return {
+            "input_ids": torch.tensor(tokenized_sample['ids']).to(self.device),
+            "attention_mask": torch.tensor(tokenized_sample['attention_mask']).to(self.device),
+        }
+
 
 # download only the tokenizer for now. prepare the dataset, and then download the model
 model_name = "EleutherAI/pythia-1.3b-deduped"
@@ -67,7 +102,7 @@ model = AutoModelForCausalLM.from_pretrained(model_name).to("cuda")
 optimizer = torch.optim.AdamW(model.parameters(), lr=1e-5)
 scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda x: 1.0 / (1.0 + 0.01 * x))
 
-train_iter = iter(AutoRegressiveDataset(train_dataset, tokenizer, seq_len))
+train_iter = iter(SingleSampleDataset(train_dataset, tokenizer, seq_len))
 validation_iter = iter(AutoRegressiveDataset(validation_dataset, tokenizer, seq_len))
 
 count = 0
@@ -78,9 +113,10 @@ for _ in (pbar := tqdm(range(epochs))):
 
         # get the next batch
         train_elems = default_collate([next(train_iter) for _ in range(bs)])
-
+        print(train_elems['input_ids'].shape)
+        print(train_elems['attention_mask'].shape)
         # forward pass
-        outputs = model(train_elems, labels=train_elems)
+        outputs = model(input_ids=train_elems['input_ids'], attention_mask=train_elems['attention_mask'], labels=train_elems)
         loss = outputs.loss
 
         # backward pass
