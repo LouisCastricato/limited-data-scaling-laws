@@ -1,4 +1,4 @@
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM, DataCollatorWithPadding
 import torch
 
 from torch.utils.data import default_collate, IterableDataset
@@ -52,11 +52,8 @@ class SingleSampleDataset(IterableDataset):
         # retrieve tokenized_dataset at idx
         tokenized_sample = self.tokenizer(self.untokenized_dataset[self.idx], padding=False, truncation=False)
         self.idx += 1
-        print(tokenized_sample['input_ids'])
-        import sys
-        sys.exit()
         return {
-            "input_ids": torch.tensor(tokenized_sample['ids']).to(self.device),
+            "input_ids": torch.tensor(tokenized_sample['input_ids']).to(self.device),
             "attention_mask": torch.tensor(tokenized_sample['attention_mask']).to(self.device),
         }
 
@@ -64,6 +61,12 @@ class SingleSampleDataset(IterableDataset):
 # download only the tokenizer for now. prepare the dataset, and then download the model
 model_name = "EleutherAI/pythia-1.3b-deduped"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+# set eos and pad
+tokenizer.eos_token = "<|endoftext|>"
+tokenizer.eos_token_id = 0
+tokenizer.pad_token = tokenizer.eos_token
+tokenizer.pad_token_id = tokenizer.eos_token_id
 
 # parameters
 epochs = 5
@@ -105,6 +108,9 @@ scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda x: 1.0 / (1.0 + 
 train_iter = iter(SingleSampleDataset(train_dataset, tokenizer, seq_len))
 validation_iter = iter(AutoRegressiveDataset(validation_dataset, tokenizer, seq_len))
 
+# instantiate the data collator, which will pad the input
+collator = DataCollatorWithPadding(tokenizer, padding=True, return_tensors="pt")
+
 count = 0
 last_val_los = 0
 for _ in (pbar := tqdm(range(epochs))):
@@ -112,11 +118,12 @@ for _ in (pbar := tqdm(range(epochs))):
     for sample in range(samples_per_epoch//bs):
 
         # get the next batch
-        train_elems = default_collate([next(train_iter) for _ in range(bs)])
-        print(train_elems['input_ids'].shape)
-        print(train_elems['attention_mask'].shape)
+        train_elems = collator([next(train_iter) for _ in range(bs)])
+        for k, v in train_elems.items():
+            train_elems[k] = v.to("cuda")
+
         # forward pass
-        outputs = model(input_ids=train_elems['input_ids'], attention_mask=train_elems['attention_mask'], labels=train_elems)
+        outputs = model(input_ids=train_elems['input_ids'], attention_mask=train_elems['attention_mask'], labels=train_elems['input_ids'])
         loss = outputs.loss
 
         # backward pass
@@ -137,13 +144,17 @@ for _ in (pbar := tqdm(range(epochs))):
     with torch.no_grad():
         for sample in range((samples_per_epoch//2)//bs):
             # get the next batch
-            validation_elems = default_collate([next(validation_iter) for _ in range(bs)])
+            validation_elems = collator([next(validation_iter) for _ in range(bs)])
+            for k, v in validation_elems.items():
+                validation_elems[k] = v.to("cuda")
+
             # forward pass
-            outputs = model(validation_elems, labels=validation_elems)
+            outputs = model(input_ids=validation_elems['input_ids'], labels=validation_elems['input_ids'])
             avg_val_loss += outputs.loss.item()
         # log the loss
         avg_val_loss /= (samples_per_epoch//2)//bs
         last_val_los = avg_val_loss
 
-# save the model
+# save the model and the tokenizer
 model.save_pretrained("finetuned_student_model")
+tokenizer.save_pretrained("finetuned_student_model")
