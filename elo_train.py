@@ -1,6 +1,5 @@
 # this file uses trlx and PPO to apply RLHF to LM
 from collections import defaultdict
-import matplotlib.pyplot as plt
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, AutoModelForSeq2SeqLM
 
@@ -27,6 +26,7 @@ if __name__ == "__main__":
     prompts = prompts[:int(len(prompts)*0.95)]
 
     # load critic model
+    print("Loading critic model...")
     model = AutoModelForSeq2SeqLM.from_pretrained("google/flan-t5-base", torch_dtype=torch.float16).to("cuda")
     tokenizer = AutoTokenizer.from_pretrained("google/flan-t5-base")
     prompt_dir = "datasets/prompts_reprocessed.csv"
@@ -44,6 +44,13 @@ if __name__ == "__main__":
         prior: string for the prior
         Returns a list of rewards for each sample.
         """
+        print(samples)
+        # for each sample, take the text after "Product review: "
+        samples = [sample.split("Product review: ")[1] for sample in samples]
+        print(samples)
+        import sys
+        sys.exit()
+
         # get the match function, No prior
         rewards = elo_schedule(None, samples, match_function)[-1].values()
 
@@ -55,7 +62,7 @@ if __name__ == "__main__":
 
     # laod TRLConfig
     config = TRLConfig.load_yaml("ppo_config.yml")
-
+    print("Beginning training...")
     model = trlx.train(
         "finetuned_student_model/",
         reward_fn=reward_fn,

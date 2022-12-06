@@ -1,6 +1,6 @@
 model:
   model_path: "finetuned_student_model/"  # Name of hf model to load
-  tokenizer_path: "EleutherAI/pythia-1.3b-deduped"  # Name of hf tokenizer to load
+  tokenizer_path: "finetuned_student_model/"  # Name of hf tokenizer to load
   model_type: "AcceleratePPOModel"  # Name of accelerate model type to load
   num_layers_unfrozen: 2  # Number of bottom layers to freeze during training
 
@@ -42,8 +42,8 @@ method:
   ref_std: null # rescale rewards with this deviation
   cliprange_reward: 10
   gen_kwargs:
-    max_length: 48  # LM max sample gen length
-    min_length: 48  # LM min sample gen length
+    max_length: 150  # LM max sample gen length
+    min_length: 48 # LM min sample gen length
     top_k: 0.0  # top k
     top_p: 1.0  # top p
     do_sample: True  # sample

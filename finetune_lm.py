@@ -1,4 +1,4 @@
-from transformers import AutoTokenizer, AutoModelForCausalLM, DataCollatorWithPadding
+from transformers import AutoTokenizer, AutoModelForCausalLM, DataCollatorWithPadding, DefaultDataCollator
 import torch
 
 from torch.utils.data import default_collate, IterableDataset
@@ -17,7 +17,8 @@ class AutoRegressiveDataset(IterableDataset):
         self.seq_len = seq_len
         self.device = device
 
-        self.tokenized_dataset = self.tokenizer("".join(self.dataset), padding=False, truncation=False)['input_ids']
+        self.dataset = "".join(dataset)
+        self.tokenized_dataset = self.tokenizer(self.dataset, padding=False, truncation=False)['input_ids']
     def __iter__(self):
         return self
     def __next__(self):
@@ -60,13 +61,11 @@ class SingleSampleDataset(IterableDataset):
 
 # download only the tokenizer for now. prepare the dataset, and then download the model
 model_name = "EleutherAI/pythia-1.3b-deduped"
-tokenizer = AutoTokenizer.from_pretrained(model_name)
+tokenizer = AutoTokenizer.from_pretrained("EleutherAI/pythia-1.3b")
 
 # set eos and pad
 tokenizer.eos_token = "<|endoftext|>"
 tokenizer.eos_token_id = 0
-tokenizer.pad_token = tokenizer.eos_token
-tokenizer.pad_token_id = tokenizer.eos_token_id
 
 # parameters
 epochs = 5
@@ -105,12 +104,11 @@ model = AutoModelForCausalLM.from_pretrained(model_name).to("cuda")
 optimizer = torch.optim.AdamW(model.parameters(), lr=1e-5)
 scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda x: 1.0 / (1.0 + 0.01 * x))
 
-train_iter = iter(SingleSampleDataset(train_dataset, tokenizer, seq_len))
+train_iter = iter(AutoRegressiveDataset(train_dataset, tokenizer, seq_len))
 validation_iter = iter(AutoRegressiveDataset(validation_dataset, tokenizer, seq_len))
 
 # instantiate the data collator, which will pad the input
-collator = DataCollatorWithPadding(tokenizer, padding=True, return_tensors="pt")
-
+collator = DefaultDataCollator(return_tensors="pt")
 count = 0
 last_val_los = 0
 for _ in (pbar := tqdm(range(epochs))):
@@ -154,6 +152,9 @@ for _ in (pbar := tqdm(range(epochs))):
         # log the loss
         avg_val_loss /= (samples_per_epoch//2)//bs
         last_val_los = avg_val_loss
+        
+        # log the loss
+        pbar.set_description(f"train loss: {loss.item()}, val loss: {last_val_los}")
 
 # save the model and the tokenizer
 model.save_pretrained("finetuned_student_model")

@@ -130,3 +130,4 @@ dmypy.json
 
 finetuned_student_model/
 *.png
+wandb/
