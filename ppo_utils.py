@@ -29,7 +29,7 @@ def elo_schedule(prior : Any,
     players : List[Any], 
     match_function : Callable, 
     player_scores : List[float] = None, 
-    samples : int = 20, 
+    samples : int = 8, 
     tournament_size : int = 1,
     mbs : int = 1,
     list_return_dict : List[Dict[Any, float]] = []) -> List[Any]:
