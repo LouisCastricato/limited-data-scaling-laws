@@ -26,7 +26,7 @@ if __name__ == "__main__":
     prompts = prompts[:int(len(prompts)*0.95)]
 
     # load critic model
-    model = AutoModelForSeq2SeqLM.from_pretrained("google/flan-t5-base")
+    model = AutoModelForSeq2SeqLM.from_pretrained("google/flan-t5-base").cuda()
     tokenizer = AutoTokenizer.from_pretrained("google/flan-t5-base")
     prompt_dir = "datasets/prompts_reprocessed.csv"
     suffix = "positive"

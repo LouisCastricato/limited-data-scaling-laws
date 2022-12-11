@@ -8,7 +8,7 @@ train:
   seq_length: 200  # Size of LM context
   epochs: 100 # Train for max(epochs, total_steps)
   total_steps: 10000  # Train for max(epochs, total_steps)a
-  batch_size: 128  # batch size
+  batch_size: 48 # batch size
 
   lr_init: 1.412e-4  # init learning rate
   lr_target: 1.412e-4  # target final learning rate

@@ -73,14 +73,14 @@ class GPTSentimentELOCritic(SentimentELOCritic):
         # get our input prompts
         input_prompt = [self.get_prompt(prior, player1[idx], player2[idx]) for idx in range(bs)]
         # tokenize input prompts
-        input_prompt = self.tokenizer(input_prompt, padding=True, truncation=True, return_tensors="pt")
+        input_prompt = self.tokenizer(input_prompt, padding=True, truncation=True, return_tensors="pt").to("cuda")
 
         # for the input prompt, find the length per prompt by summing the attention mask
         input_prompt_len = torch.sum(input_prompt['attention_mask'], dim=1)
         # forward pass through the model
         output = self.model(input_ids=input_prompt['input_ids'], attention_mask=input_prompt['attention_mask'])
         # get the last logit for each prompt
-        output = output.logits[torch.arange(bs), input_prompt_len-1]
+        output = output.logits[torch.arange(bs).to("cuda"), input_prompt_len-1]
 
         # get the logits for the options
         option_a_logits = output[:, self.option_tokens[0]]
@@ -119,12 +119,12 @@ class T5SentimentELOCritic(SentimentELOCritic):
         """
         bs = len(player1)
         # construct decoder_input_ids from EOD token
-        decoder_input_ids = torch.ones((bs, 1), dtype=torch.long) * self.model.config.decoder_start_token_id
+        decoder_input_ids = torch.ones((bs, 1), dtype=torch.long, device="cuda") * self.model.config.decoder_start_token_id
 
         # get our input prompts
         input_prompt = [self.get_prompt(prior, player1[idx], player2[idx], k=0) for idx in range(bs)]
         # tokenize input prompts
-        input_prompt = self.tokenizer(input_prompt, padding=True, truncation=True, return_tensors="pt")
+        input_prompt = self.tokenizer(input_prompt, padding=True, truncation=True, return_tensors="pt").to("cuda")
 
         # for the input prompt, find the length per prompt by summing the attention mask
         input_prompt_len = torch.sum(input_prompt['attention_mask'], dim=1)
