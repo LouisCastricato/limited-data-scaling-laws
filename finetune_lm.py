@@ -4,9 +4,13 @@ import torch
 from torch.utils.data import default_collate, IterableDataset, Dataset, DataLoader
 import pandas as pd
 from tqdm import tqdm
-
-class AutoRegressiveDataset(IterableDataset):
-    def __init__(self, dataset, tokenizer, seq_len, device="cuda"):
+from trlx.utils.modeling import (
+    freeze_bottom_causal_layers,
+    hf_get_causal_base_model,
+    hf_get_causal_hidden_layers
+)
+class AutoRegressiveDataset(Dataset):
+    def __init__(self, dataset, tokenizer, seq_len = 2048, device="cuda"):
         """
         dataset: list of strings
         tokenizer: tokenizer object
@@ -19,12 +23,13 @@ class AutoRegressiveDataset(IterableDataset):
 
         self.dataset = "".join(dataset)
         self.tokenized_dataset = self.tokenizer(self.dataset, padding=False, truncation=False)['input_ids']
-    def __iter__(self):
-        return self
-    def __next__(self):
+    def __len__(self):
+        return len(self.tokenized_dataset)//self.seq_len
+    def __getitem__(self,idx):
         # take a random sample from the dataset of length seq_len
-        start = torch.randint(0, len(self.tokenized_dataset) - self.seq_len, (1,)).item()
-        end = start + self.seq_len
+        start = idx*self.seq_len
+        end = min((idx+1)*self.seq_len, len(self.tokenized_dataset))
+
         out_tensor = torch.tensor(self.tokenized_dataset[start:end], device=self.device)
     
         return {
@@ -33,26 +38,21 @@ class AutoRegressiveDataset(IterableDataset):
         }
 
 class SingleSampleDataset(Dataset):
-    def __init__(self, dataset, tokenizer, seq_len, device="cuda"):
+    def __init__(self, dataset, tokenizer, device="cuda"):
         """
         dataset: list of strings
         tokenizer: tokenizer object
-        seq_len: sequence length
         """
         self.dataset = dataset
         self.tokenizer = tokenizer
-        self.seq_len = seq_len
         self.device = device
-        self.untokenized_dataset = self.dataset
-
-        self.tokenized_dataset = self.tokenizer(self.dataset, padding=False, truncation=False)
 
     def __len__(self):
-        return len(self.untokenized_dataset)
+        return len(self.dataset)
 
     def __getitem__(self, idx):
-        # retrieve tokenized_dataset at idx
-        tokenized_sample = self.tokenizer(self.untokenized_dataset[idx], padding=False, truncation=False)
+        # retrieve tokenized_dataset at idx.
+        tokenized_sample = self.tokenizer(self.dataset[idx], padding=False, truncation=False)
 
         return {
             "input_ids": torch.tensor(tokenized_sample['input_ids']).to(self.device),
@@ -61,21 +61,20 @@ class SingleSampleDataset(Dataset):
 
 
 # download only the tokenizer for now. prepare the dataset, and then download the model
-model_name = "EleutherAI/pythia-1.3b-deduped"
-tokenizer = AutoTokenizer.from_pretrained("EleutherAI/pythia-1.3b")
+model_name = "EleutherAI/pythia-2.7b-deduped"
+tokenizer = AutoTokenizer.from_pretrained("EleutherAI/pythia-2.7b")
 
 # set eos and pad
 tokenizer.eos_token = "<|endoftext|>"
 tokenizer.eos_token_id = 0
 
-# add special pad
-tokenizer.add_special_tokens({"pad_token": "<|pad|>"})
+tokenizer.pad_token = "<|padding|>"
+tokenizer.pad_token_id = 1
 
 # parameters
 epochs = 1
-seq_len = 1024
-bs = 15
-grad_acc_steps = 1
+bs = 1
+grad_acc_steps = 8
 validate_every = 20
 
 # load finetuning_examples.csv, which is comma delimited
@@ -88,8 +87,8 @@ def collate(string):
     review = '\n'.join(split_string[1:])
 
     # append EOT after
-    output_string = "Product name: " + name + "\nProduct review: " + review + "\n"
-    return  tokenizer.decode(tokenizer(output_string)['input_ids'] + [0])
+    output_string = "Product name: " + name + " Product review: " + review + "\n"
+    return  tokenizer.decode(tokenizer(output_string)['input_ids'])
 
 # collate over the entire dataset
 dataset = []
@@ -102,61 +101,67 @@ train_dataset = dataset[:int(len(dataset)*0.95)]
 validation_dataset = dataset[int(len(dataset)*0.95):]
 
 # download the model
-model = AutoModelForCausalLM.from_pretrained(model_name).to("cuda")
+model = AutoModelForCausalLM.from_pretrained(model_name)
+#freeze_bottom_causal_layers(model, 2)
+
+model = model.to("cuda")
 
 # instatiate the optimizer with warmup
-optimizer = torch.optim.AdamW(model.parameters(), lr=5e-5)
+optimizer = torch.optim.AdamW(model.parameters(), lr=1e-5)
 scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda x: float(epochs) / (float(epochs) + 0.01 * x))
 
-train = SingleSampleDataset(train_dataset, tokenizer, seq_len)
-validation = SingleSampleDataset(validation_dataset, tokenizer, seq_len)
+train = AutoRegressiveDataset(train_dataset, tokenizer)
+validation = AutoRegressiveDataset(validation_dataset, tokenizer)
 
 # instantiate the data collator, which will pad the input
 collator = DataCollatorWithPadding(return_tensors="pt", padding=True, tokenizer=tokenizer)
 train_dataloader = DataLoader(train, batch_size=bs, shuffle=True, collate_fn=collator)
 val_dataloader = DataLoader(validation, batch_size=bs, shuffle=True, collate_fn=collator)
 
+print("Training on", len(train), "samples")
 count = 0
 last_val_los = 0
-for _ in (pbar := tqdm(range(epochs))):
-    # train
-    for train_elems in train_dataloader:
-        for k, v in train_elems.items():
-            train_elems[k] = v.to("cuda")
 
-        # forward pass
-        outputs = model(input_ids=train_elems['input_ids'], attention_mask=train_elems['attention_mask'], labels=train_elems['input_ids'])
-        loss = outputs.loss
+# train. set up tqdm with pbar
+for train_elems in (pbar := tqdm(train_dataloader, total=len(train_dataloader))):
+    for k, v in train_elems.items():
+        train_elems[k] = v.to("cuda")
 
-        # backward pass
-        loss.backward()
+    # forward pass
+    outputs = model(input_ids=train_elems['input_ids'], attention_mask=train_elems['attention_mask'], labels=train_elems['input_ids'])
+    loss = outputs.loss
 
-        # gradient accumulation
-        if (count+1) % grad_acc_steps == 0:
-            optimizer.step()
-            optimizer.zero_grad()
-            scheduler.step()
-        # update the learning rate
-        if (count+1) % validate_every == 0:
-            # validation
-            avg_val_loss = 0
-            with torch.no_grad():
-                for val_elems in val_dataloader:
-                    for k, v in val_elems.items():
-                        val_elems[k] = v.to("cuda")
+    # backward pass
+    loss.backward()
 
-                    # forward pass
-                    outputs = model(input_ids=val_elems['input_ids'], labels=val_elems['input_ids'])
-                    avg_val_loss += outputs.loss.item()
-                # log the loss
-                avg_val_loss /= len(val_dataloader)
-                last_val_los = avg_val_loss
-            
-        count += 1
+    # gradient accumulation
+    if (count+1) % grad_acc_steps == 0:
+        optimizer.step()
+        optimizer.zero_grad()
 
-        # log the loss
-        pbar.set_description(f"train loss: {loss.item()}, val loss: {last_val_los}")
+    # update the learning rate
+    if (count+1) % validate_every == 0:
+        # validation
+        avg_val_loss = 0
+        with torch.no_grad():
+            for val_elems in val_dataloader:
+                for k, v in val_elems.items():
+                    val_elems[k] = v.to("cuda")
 
-# save the model and the tokenizer
-model.save_pretrained("finetuned_student_model")
-tokenizer.save_pretrained("finetuned_student_model")
+                # forward pass
+                outputs = model(input_ids=val_elems['input_ids'], labels=val_elems['input_ids'])
+                avg_val_loss += outputs.loss.item()
+            # log the loss
+            avg_val_loss /= len(val_dataloader)
+
+            if avg_val_loss <= last_val_los:
+                # save the model
+                model.save_pretrained("finetuned_student_model")
+                tokenizer.save_pretrained("finetuned_student_model")
+
+            last_val_los = avg_val_loss
+
+    count += 1
+
+    # log the loss
+    pbar.set_description(f"train loss: {loss.item()}, val loss: {last_val_los}")
